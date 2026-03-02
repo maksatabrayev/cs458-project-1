@@ -1,0 +1,10 @@
+stateDiagram
+  direction TB
+  [*] --> Active:Sıgn Up
+  Active --> Suspended:Delete Account
+  Active --> Challenged:Suspicious Entry
+  Challenged --> Active:Disarmed by LLM
+  Challenged --> Locked:Considered risky by LLM
+  Challenged --> Suspended:Multiple Lockings
+  Locked --> Active:Authanticated by User
+  Suspended --> [*]: Certain deletion after a time
