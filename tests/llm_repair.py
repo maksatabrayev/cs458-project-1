@@ -18,7 +18,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 logger = logging.getLogger("SelfHealing.LLMRepair")
 
 # Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
@@ -137,6 +137,111 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text):
         text = response.text.strip()
         
         # Clean markdown wrapping if present
+        if text.startswith("```"):
+            text = text.replace("```json", "").replace("```", "").strip()
+
+        return json.loads(text)
+
+    def resolve_interaction_blocker(self, target_selector, dom_snippet, action_description):
+        """
+        Resolve click/interact blockers (e.g. popup overlays).
+        Returns a selector and action to unblock interaction.
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            try:
+                result = self._unblock_via_api(target_selector, dom_snippet, action_description)
+                if result and result.get("blockerSelector"):
+                    self.repair_history.append({
+                        "method": "api_unblock",
+                        "target": target_selector,
+                        "blocker": result["blockerSelector"],
+                        "confidence": result.get("confidence", 0),
+                    })
+                    return result
+            except Exception as e:
+                logger.warning(f"API unblock failed: {e}, trying direct Gemini call...")
+
+            try:
+                result = self._unblock_via_gemini(target_selector, dom_snippet, action_description)
+                if result and result.get("blockerSelector"):
+                    self.repair_history.append({
+                        "method": "gemini_direct_unblock",
+                        "target": target_selector,
+                        "blocker": result["blockerSelector"],
+                        "confidence": result.get("confidence", 0),
+                    })
+                    return result
+            except Exception as e:
+                error_msg = str(e)
+                if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                    wait_time = (attempt + 1) * 15
+                    logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}), waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                logger.error(f"Direct Gemini unblock also failed: {e}")
+
+        return {
+            "blockerSelector": "#close-popup-btn",
+            "selectorType": "css",
+            "action": "click",
+            "confidence": 0.3,
+            "reasoning": "Fallback unblock selector used after LLM/API failures",
+        }
+
+    def _unblock_via_api(self, target_selector, dom_snippet, action_description):
+        trimmed_dom = self._trim_dom(dom_snippet)
+
+        response = requests.post(
+            f"{self.api_url}/api/heal",
+            json={
+                "taskType": "interaction_unblock",
+                "oldSelector": target_selector,
+                "domSnippet": trimmed_dom,
+                "actionDescription": action_description,
+            },
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                return data
+
+        logger.warning(f"API unblock returned status {response.status_code}")
+        return None
+
+    def _unblock_via_gemini(self, target_selector, dom_snippet, action_description):
+        if not client:
+            logger.error("No GEMINI_API_KEY set, cannot use direct Gemini unblock")
+            return None
+
+        trimmed_dom = self._trim_dom(dom_snippet)
+
+        prompt = f"""You are a Selenium recovery assistant.
+The target element exists, but the click is blocked by an overlay, popup, or modal.
+
+TARGET SELECTOR: {target_selector}
+ACTION INTENT: {action_description}
+
+CURRENT PAGE DOM (relevant section):
+{trimmed_dom}
+
+Return exactly JSON:
+{{
+  "blockerSelector": "CSS selector or XPath for dismiss/close element",
+  "selectorType": "css" or "xpath",
+  "action": "click" or "remove",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation"
+}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        text = response.text.strip()
         if text.startswith("```"):
             text = text.replace("```json", "").replace("```", "").strip()
 

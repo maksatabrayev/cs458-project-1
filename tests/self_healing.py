@@ -21,6 +21,7 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     TimeoutException,
     ElementNotInteractableException,
+    ElementClickInterceptedException,
     StaleElementReferenceException,
 )
 from llm_repair import LLMRepair
@@ -281,6 +282,64 @@ class SelfHealingDriver:
     def execute_script(self, script, *args):
         """Execute JavaScript on the page."""
         return self.driver.execute_script(script, *args)
+
+    def click_element_resilient(self, by, value, description="", timeout=10):
+        """
+        Click an element with multimodal recovery.
+        If click is intercepted, asks LLM which blocker to dismiss, then retries.
+        """
+        target_element = self.find_element_clickable(by, value, description, timeout)
+
+        try:
+            target_element.click()
+            logger.info(f"[OK] Clicked target element: {value}")
+            return target_element
+        except ElementClickInterceptedException:
+            logger.warning(f"[WARN] Click intercepted for {value}. Attempting multimodal recovery...")
+
+            dom = self.driver.page_source
+            selector_type = "css" if by == By.CSS_SELECTOR else "id" if by == By.ID else "xpath"
+            target_selector = f"{selector_type}={value}"
+
+            unblock_result = self.llm_repair.resolve_interaction_blocker(
+                target_selector=target_selector,
+                dom_snippet=dom,
+                action_description=description or f"Click element {value}",
+            )
+
+            blocker_selector = unblock_result.get("blockerSelector")
+            blocker_type = unblock_result.get("selectorType", "css")
+            action = unblock_result.get("action", "click")
+            confidence = unblock_result.get("confidence", 0)
+            reasoning = unblock_result.get("reasoning", "Interaction blocker recovery")
+
+            if not blocker_selector:
+                raise ElementClickInterceptedException(
+                    f"Multimodal recovery failed for {value}: no blocker selector returned"
+                )
+
+            blocker_by = By.CSS_SELECTOR if blocker_type == "css" else By.XPATH
+            blocker_element = WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((blocker_by, blocker_selector))
+            )
+
+            if action == "remove":
+                self.driver.execute_script("arguments[0].remove();", blocker_element)
+            else:
+                blocker_element.click()
+
+            self._record_healing(
+                old_selector=value,
+                new_selector=blocker_selector,
+                selector_type=blocker_type,
+                confidence=confidence,
+                reasoning=f"Multimodal unblock: {reasoning}",
+            )
+
+            healed_target = self.find_element_clickable(by, value, description, timeout)
+            healed_target.click()
+            logger.info(f"[HEALED] Click succeeded after blocker handling: {value}")
+            return healed_target
 
     def take_screenshot(self, filename):
         """Take a screenshot."""

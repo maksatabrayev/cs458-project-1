@@ -1,23 +1,38 @@
 import { NextResponse } from "next/server";
-const { repairSelector } = require("@/lib/llmClient");
+const { repairSelector, resolveInteractionBlocker } = require("@/lib/llmClient");
 
 export async function POST(request) {
     try {
         const body = await request.json();
-        const { oldSelector, domSnippet, elementDescription } = body;
+        const { oldSelector, domSnippet, elementDescription, taskType, actionDescription } = body;
 
-        if (!oldSelector || !domSnippet) {
+        if (!domSnippet) {
             return NextResponse.json(
-                { error: "oldSelector and domSnippet are required" },
+                { error: "domSnippet is required" },
                 { status: 400 }
             );
         }
 
-        const result = await repairSelector(
-            oldSelector,
-            domSnippet,
-            elementDescription || "Unknown element"
-        );
+        let result;
+        if (taskType === "interaction_unblock") {
+            result = await resolveInteractionBlocker(
+                oldSelector || "unknown",
+                domSnippet,
+                actionDescription || elementDescription || "Recover blocked click"
+            );
+        } else {
+            if (!oldSelector) {
+                return NextResponse.json(
+                    { error: "oldSelector is required for selector repair" },
+                    { status: 400 }
+                );
+            }
+            result = await repairSelector(
+                oldSelector,
+                domSnippet,
+                elementDescription || "Unknown element"
+            );
+        }
 
         return NextResponse.json({
             success: true,

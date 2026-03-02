@@ -39,43 +39,31 @@ class TestMultimodalFailure:
         mutations = shadow_listener.get_mutations()
         assert len(mutations) > 0, "DOM mutations should be detected when popup appears"
 
-        # Try to click the Google login button — it should be blocked by popup
+        # Baseline: direct click should be blocked by popup
         try:
             google_btn = healing_driver.driver.find_element(By.ID, "google-login-btn")
             google_btn.click()
             # If we get here without error, the popup didn't block it (unexpected)
             pytest.skip("Popup did not block the button click")
         except ElementClickInterceptedException:
-            # Expected! The popup is blocking the click. 
-            # Now test our intelligent handling.
+            # Expected! The popup is blocking the click.
             pass
 
-        # Step 1: Detect the popup overlay
-        popup = healing_driver.find_element(
-            By.ID, "dynamic-popup-overlay",
-            description="Cookie consent popup overlay blocking the page"
+        # Intelligent multimodal recovery:
+        # LLM should identify blocker dismissal action, then retry click.
+        healing_driver.click_element_resilient(
+            By.ID,
+            "google-login-btn",
+            description="Click Google login button while popup may block the interaction",
         )
-        assert popup is not None, "Popup overlay should be detected"
-
-        # Step 2: Find and click the close button on the popup
-        close_btn = healing_driver.find_element(
-            By.ID, "close-popup-btn",
-            description="Button to close/accept the cookie popup"
-        )
-        assert close_btn is not None, "Close popup button should be found"
-        close_btn.click()
         time.sleep(1)
-
-        # Step 3: Now the Google login button should be clickable
-        google_btn = healing_driver.find_element_clickable(
-            By.ID, "google-login-btn",
-            description="Login with Google button"
-        )
-        assert google_btn is not None, "Google login button should be clickable after popup closed"
 
         # Verify popup is gone
         popups = healing_driver.driver.find_elements(By.ID, "dynamic-popup-overlay")
         assert len(popups) == 0, "Popup should be dismissed"
+
+        # Verify multimodal healing was logged
+        assert len(healing_driver.healing_log) > 0, "Multimodal healing event should be recorded"
 
         print("✅ Successfully handled multimodal failure: popup → close → click")
 

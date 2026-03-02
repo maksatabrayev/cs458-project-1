@@ -21,6 +21,9 @@ export async function POST(request) {
             "127.0.0.1";
         const userAgent = request.headers.get("user-agent") || "Unknown";
 
+        // Debug log to see actual IP
+        console.log("🔍 Login attempt - IP:", ip, "| Identifier:", identifier);
+
         // Validate input
         if (!identifier || !password) {
             return NextResponse.json(
@@ -124,6 +127,12 @@ export async function POST(request) {
                     accountStatus: updatedUser.status,
                     riskScore: riskAssessment.score,
                     riskLevel: riskAssessment.level,
+                    riskFactors: riskAssessment.factors, // Show which factors triggered
+                    debugInfo: {
+                        userFailedAttempts: user.failedAttempts,
+                        clientIP: ip,
+                        isKnownIP: user.knownIPs.includes(ip),
+                    },
                 },
                 { status: 401 }
             );

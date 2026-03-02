@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { resetUserStatus, getAllUsers, findUserByEmail } from "@/lib/users";
+
+const { resetUserStatus, getAllUsers, findUserByEmail } = require("@/lib/users");
 
 // GET: List all users with their current status
 export async function GET() {

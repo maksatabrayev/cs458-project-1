@@ -53,11 +53,17 @@ const handler = NextAuth({
         strategy: "jwt",
     },
     callbacks: {
-        async jwt({ token, user }) {
+        async jwt({ token, user, account }) {
             if (user) {
                 token.id = user.id;
                 token.riskScore = user.riskScore;
                 token.riskLevel = user.riskLevel;
+            }
+            if (account) {
+                token.authProvider = account.provider;
+                token.oauthTokenCaptured = Boolean(account.access_token || account.id_token);
+                token.oauthTokenType = account.token_type || null;
+                token.oauthScope = account.scope || null;
             }
             return token;
         },
@@ -65,6 +71,10 @@ const handler = NextAuth({
             session.user.id = token.id;
             session.user.riskScore = token.riskScore;
             session.user.riskLevel = token.riskLevel;
+            session.user.authProvider = token.authProvider || null;
+            session.user.oauthTokenCaptured = Boolean(token.oauthTokenCaptured);
+            session.user.oauthTokenType = token.oauthTokenType || null;
+            session.user.oauthScope = token.oauthScope || null;
             return session;
         },
     },
