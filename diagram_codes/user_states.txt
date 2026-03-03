@@ -1,10 +1,16 @@
+---
+config:
+  layout: elk
+---
 stateDiagram
   direction TB
-  [*] --> Active:Sıgn Up
-  Active --> Suspended:Delete Account
+  [*] --> Active:Sign Up
+  Active --> [*]:Delete Account
   Active --> Challenged:Suspicious Entry
+  Active --> Suspended:Multiple False Attempts
   Challenged --> Active:Disarmed by LLM
   Challenged --> Locked:Considered risky by LLM
-  Challenged --> Suspended:Multiple Lockings
-  Locked --> Active:Authanticated by User
-  Suspended --> [*]: Certain deletion after a time
+  Suspended --> Locked:Multiple Suspensions
+  Suspended --> Active:After a cooldown
+  Locked --> Active:Re-Authanticated by User
+  Locked --> [*]:Not re-authanticated in a time period
