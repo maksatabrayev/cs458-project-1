@@ -4,6 +4,9 @@ import FacebookProvider from "next-auth/providers/facebook";
 import GitHubProvider from "next-auth/providers/github";
 import CredentialsProvider from "next-auth/providers/credentials";
 
+import { findUserByEmailOrPhone } from "@/lib/users"; 
+import { verifyOAuthLogin } from "@/lib/oauthSecurity"; // NEW IMPORT
+
 const handler = NextAuth({
     providers: [
         GoogleProvider({
@@ -58,12 +61,49 @@ const handler = NextAuth({
         strategy: "jwt",
     },
     callbacks: {
+        async signIn({ user, account }) {
+            // Let standard credentials through
+            if (account.provider === "credentials") return true;
+
+            // For Google/GitHub, run the native security function directly!
+            if (["google", "github"].includes(account.provider)) {
+                try {
+                    // Look how much cleaner and faster this is!
+                    const securityCheck = await verifyOAuthLogin(user.email);
+
+                    if (securityCheck.exists && securityCheck.allowed) {
+                        return true; // Let them in!
+                    }
+                    
+                    // Optional: You can redirect to an error page if they fail the check
+                    // return "/login?error=AccessDenied"; 
+                    return false; 
+
+                } catch (error) {
+                    console.error("OAuth Security Check Failed:", error);
+                    return false; 
+                }
+            }
+            return false;
+        },
+
         async jwt({ token, user, account }) {
             if (user) {
                 token.id = user.id;
-                token.riskScore = user.riskScore;
-                token.riskLevel = user.riskLevel;
+
+                if (account && account.provider !== "credentials") {
+                    const dbUser = findUserByEmailOrPhone(user.email);
+                    if (dbUser) {
+                        token.id = dbUser.id; 
+                        token.riskScore = dbUser.riskScore; 
+                        token.riskLevel = dbUser.riskLevel;
+                    }
+                } else {
+                    token.riskScore = user.riskScore;
+                    token.riskLevel = user.riskLevel;
+                }
             }
+
             if (account) {
                 token.authProvider = account.provider;
                 token.oauthTokenCaptured = Boolean(account.access_token || account.id_token);
@@ -72,6 +112,7 @@ const handler = NextAuth({
             }
             return token;
         },
+
         async session({ session, token }) {
             session.user.id = token.id;
             session.user.riskScore = token.riskScore;
