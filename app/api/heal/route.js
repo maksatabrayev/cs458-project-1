@@ -34,9 +34,20 @@ export async function POST(request) {
             );
         }
 
+        const hasUsableSelector = taskType === "interaction_unblock"
+            ? Boolean(result?.blockerSelector)
+            : Boolean(result?.newSelector);
+
+        const failureReason = result?.reasoning
+            || result?.error
+            || (taskType === "interaction_unblock"
+                ? "Could not resolve interaction blocker"
+                : "Could not repair selector");
+
         return NextResponse.json({
-            success: true,
-            ...result,
+            success: hasUsableSelector,
+            ...(result || {}),
+            ...(hasUsableSelector ? {} : { error: failureReason }),
         });
     } catch (error) {
         console.error("Heal API Error:", error);

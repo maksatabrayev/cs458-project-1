@@ -19,12 +19,30 @@ function DashboardContent() {
     // Use session data if available, otherwise use URL params
     const displayUser = session?.user || user;
 
-    const handleLogout = () => {
-        if (session) {
-            signOut({ callbackUrl: "/" });
-        } else {
-            window.location.href = "/";
+    const clearClientAuthArtifacts = () => {
+        try {
+            sessionStorage.clear();
+            localStorage.clear();
+        } catch (e) { }
+
+        // Best-effort removal of non-HttpOnly cookies on this origin.
+        const cookies = document.cookie ? document.cookie.split(";") : [];
+        for (const cookie of cookies) {
+            const name = cookie.split("=")[0]?.trim();
+            if (!name) continue;
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
         }
+    };
+
+    const handleLogout = async () => {
+        clearClientAuthArtifacts();
+
+        if (session) {
+            await signOut({ callbackUrl: "/" });
+            return;
+        }
+
+        window.location.href = "/";
     };
 
     const handleResetAccount = async () => {

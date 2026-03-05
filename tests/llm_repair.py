@@ -1,32 +1,24 @@
 """
 LLM Repair Module
 =================
-Handles communication with the Gemini LLM for repairing broken selectors.
-Can use either the web app's /api/heal endpoint or direct Gemini API.
+Handles communication with the web app's /api/heal endpoint for
+repairing broken selectors and resolving interaction blockers.
 """
 
 import os
-import json
-import time
 import logging
 import requests
-from google import genai
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
 logger = logging.getLogger("SelfHealing.LLMRepair")
 
-# Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-
 
 class LLMRepair:
     """
-    LLM-based selector repair.
-    Primary: uses the /api/heal endpoint on the web server.
-    Fallback: directly calls Gemini API.
+    API-only selector repair.
+    Calls /api/heal once per healing attempt and fails fast on errors.
     """
 
     def __init__(self, api_url="http://localhost:3000"):
@@ -35,54 +27,35 @@ class LLMRepair:
 
     def repair_selector(self, old_selector, dom_snippet, element_description):
         """
-        Attempt to repair a broken selector with retry logic.
-        First tries the API endpoint, falls back to direct Gemini call.
-        Retries up to 3 times with delays if rate limited.
+        Attempt to repair a broken selector with a single API call.
+        Returns None immediately when the API cannot provide a selector.
         """
-        max_retries = 3
+        result = self._repair_via_api(old_selector, dom_snippet, element_description)
+        if result and result.get("newSelector"):
+            self.repair_history.append(
+                {
+                    "method": "api",
+                    "old": old_selector,
+                    "new": result["newSelector"],
+                    "confidence": result.get("confidence", 0),
+                }
+            )
+            return result
 
-        for attempt in range(max_retries):
-            # Try API endpoint first
-            try:
-                result = self._repair_via_api(old_selector, dom_snippet, element_description)
-                if result and result.get("newSelector"):
-                    self.repair_history.append({
-                        "method": "api",
-                        "old": old_selector,
-                        "new": result["newSelector"],
-                        "confidence": result.get("confidence", 0),
-                    })
-                    return result
-            except Exception as e:
-                logger.warning(f"API repair failed: {e}, trying direct Gemini call...")
-
-            # Fallback: direct Gemini API
-            try:
-                result = self._repair_via_gemini(old_selector, dom_snippet, element_description)
-                if result and result.get("newSelector"):
-                    self.repair_history.append({
-                        "method": "gemini_direct",
-                        "old": old_selector,
-                        "new": result["newSelector"],
-                        "confidence": result.get("confidence", 0),
-                    })
-                    return result
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                    wait_time = (attempt + 1) * 15  # 15s, 30s, 45s
-                    logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}), waiting {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                logger.error(f"Direct Gemini repair also failed: {e}")
-
+        logger.warning(
+            "Repair failed fast via /api/heal for selector '%s'. API response: %s",
+            old_selector,
+            result,
+        )
         return None
 
     def _repair_via_api(self, old_selector, dom_snippet, element_description):
         """Call the /api/heal endpoint on the web server."""
-        # Trim DOM to avoid huge payloads
-        trimmed_dom = self._trim_dom(dom_snippet)
-        
+        trimmed_dom = self._trim_dom(
+            dom_snippet,
+            context_hints=[old_selector, element_description],
+        )
+
         response = requests.post(
             f"{self.api_url}/api/heal",
             json={
@@ -93,105 +66,64 @@ class LLMRepair:
             timeout=30,
         )
 
-        if response.status_code == 200:
+        try:
             data = response.json()
-            if data.get("success"):
-                return data
-        
-        logger.warning(f"API returned status {response.status_code}")
-        return None
+        except ValueError:
+            data = {
+                "success": False,
+                "error": "Non-JSON response from /api/heal",
+                "statusCode": response.status_code,
+            }
 
-    def _repair_via_gemini(self, old_selector, dom_snippet, element_description):
-        """Call Gemini API directly for selector repair."""
-        if not client:
-            logger.error("No GEMINI_API_KEY set, cannot use direct Gemini repair")
-            return None
+        if response.status_code != 200:
+            logger.warning(
+                "API repair returned non-200 status=%s body=%s",
+                response.status_code,
+                data,
+            )
+            return data
 
-        trimmed_dom = self._trim_dom(dom_snippet)
+        if not data.get("success"):
+            logger.warning("API repair returned success=false body=%s", data)
+            return data
 
-        prompt = f"""You are a Selenium test repair assistant. A test element locator has broken due to UI changes.
-
-OLD SELECTOR: {old_selector}
-ELEMENT DESCRIPTION: {element_description}
-
-CURRENT PAGE DOM (relevant section):
-{trimmed_dom}
-
-Your task:
-1. Analyze the DOM to find the element that most likely matches the old selector's intent.
-2. Return a new, valid CSS selector or XPath that will locate the correct element.
-3. Do NOT hallucinate selectors. Only return selectors for elements actually present in the DOM.
-
-RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text):
-{{
-  "newSelector": "the new CSS selector or XPath",
-  "selectorType": "css" or "xpath",
-  "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation of why this element matches"
-}}"""
-
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-        )
-        text = response.text.strip()
-        
-        # Clean markdown wrapping if present
-        if text.startswith("```"):
-            text = text.replace("```json", "").replace("```", "").strip()
-
-        return json.loads(text)
+        return data
 
     def resolve_interaction_blocker(self, target_selector, dom_snippet, action_description):
         """
-        Resolve click/interact blockers (e.g. popup overlays).
-        Returns a selector and action to unblock interaction.
+        Resolve click/interact blockers with a single API call.
+        Falls back immediately to deterministic close selector.
         """
-        max_retries = 3
+        result = self._unblock_via_api(target_selector, dom_snippet, action_description)
+        if result and result.get("blockerSelector"):
+            self.repair_history.append(
+                {
+                    "method": "api_unblock",
+                    "target": target_selector,
+                    "blocker": result["blockerSelector"],
+                    "confidence": result.get("confidence", 0),
+                }
+            )
+            return result
 
-        for attempt in range(max_retries):
-            try:
-                result = self._unblock_via_api(target_selector, dom_snippet, action_description)
-                if result and result.get("blockerSelector"):
-                    self.repair_history.append({
-                        "method": "api_unblock",
-                        "target": target_selector,
-                        "blocker": result["blockerSelector"],
-                        "confidence": result.get("confidence", 0),
-                    })
-                    return result
-            except Exception as e:
-                logger.warning(f"API unblock failed: {e}, trying direct Gemini call...")
-
-            try:
-                result = self._unblock_via_gemini(target_selector, dom_snippet, action_description)
-                if result and result.get("blockerSelector"):
-                    self.repair_history.append({
-                        "method": "gemini_direct_unblock",
-                        "target": target_selector,
-                        "blocker": result["blockerSelector"],
-                        "confidence": result.get("confidence", 0),
-                    })
-                    return result
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                    wait_time = (attempt + 1) * 15
-                    logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}), waiting {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                logger.error(f"Direct Gemini unblock also failed: {e}")
-
+        logger.warning(
+            "Unblock failed fast via /api/heal for target '%s'. API response: %s. Using deterministic fallback.",
+            target_selector,
+            result,
+        )
         return {
             "blockerSelector": "#close-popup-btn",
             "selectorType": "css",
             "action": "click",
             "confidence": 0.3,
-            "reasoning": "Fallback unblock selector used after LLM/API failures",
+            "reasoning": "Fallback unblock selector used after /api/heal could not resolve blocker",
         }
 
     def _unblock_via_api(self, target_selector, dom_snippet, action_description):
-        trimmed_dom = self._trim_dom(dom_snippet)
+        trimmed_dom = self._trim_dom(
+            dom_snippet,
+            context_hints=[target_selector, action_description],
+        )
 
         response = requests.post(
             f"{self.api_url}/api/heal",
@@ -204,62 +136,78 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text):
             timeout=30,
         )
 
-        if response.status_code == 200:
+        try:
             data = response.json()
-            if data.get("success"):
-                return data
+        except ValueError:
+            data = {
+                "success": False,
+                "error": "Non-JSON response from /api/heal",
+                "statusCode": response.status_code,
+            }
 
-        logger.warning(f"API unblock returned status {response.status_code}")
-        return None
+        if response.status_code != 200:
+            logger.warning(
+                "API unblock returned non-200 status=%s body=%s",
+                response.status_code,
+                data,
+            )
+            return data
 
-    def _unblock_via_gemini(self, target_selector, dom_snippet, action_description):
-        if not client:
-            logger.error("No GEMINI_API_KEY set, cannot use direct Gemini unblock")
-            return None
+        if not data.get("success"):
+            logger.warning("API unblock returned success=false body=%s", data)
+            return data
 
-        trimmed_dom = self._trim_dom(dom_snippet)
+        return data
 
-        prompt = f"""You are a Selenium recovery assistant.
-The target element exists, but the click is blocked by an overlay, popup, or modal.
-
-TARGET SELECTOR: {target_selector}
-ACTION INTENT: {action_description}
-
-CURRENT PAGE DOM (relevant section):
-{trimmed_dom}
-
-Return exactly JSON:
-{{
-  "blockerSelector": "CSS selector or XPath for dismiss/close element",
-  "selectorType": "css" or "xpath",
-  "action": "click" or "remove",
-  "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation"
-}}"""
-
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-        )
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.replace("```json", "").replace("```", "").strip()
-
-        return json.loads(text)
-
-    def _trim_dom(self, dom, max_length=5000):
-        """Trim DOM to relevant portions to avoid token limits."""
+    def _trim_dom(self, dom, context_hints=None, max_length=12000):
+        """Trim DOM to relevant portions while preserving likely interactive regions."""
         if len(dom) <= max_length:
             return dom
-        
-        # Try to find the <body> content and trim that
+
         body_start = dom.find("<body")
         if body_start > 0:
             dom = dom[body_start:]
-        
-        # If still too long, take first and last portions
+
+        def centered_slice(source, center_idx):
+            half = max_length // 2
+            start = max(0, center_idx - half)
+            end = min(len(source), start + max_length)
+            start = max(0, end - max_length)
+            return source[start:end]
+
+        hints = []
+        for hint in (context_hints or []):
+            if not hint:
+                continue
+            norm = str(hint).lower()
+            hints.extend([part for part in norm.replace("=", " ").split() if part])
+
+        stable_markers = [
+            "login-form",
+            "login-container",
+            "login-card",
+            "sign in",
+            "identifier",
+            "password",
+            "btn-primary",
+            "google-login-btn",
+            "facebook-login-btn",
+            "github-login-btn",
+            "dynamic-popup-overlay",
+            "close-popup-btn",
+            "<form",
+            "<input",
+            "<button",
+        ]
+        markers = hints + stable_markers
+
+        for marker in markers:
+            idx = dom.lower().find(marker.lower())
+            if idx >= 0:
+                return centered_slice(dom, idx)
+
         if len(dom) > max_length:
             half = max_length // 2
             return dom[:half] + "\n... [DOM TRIMMED] ...\n" + dom[-half:]
-        
+
         return dom

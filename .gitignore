@@ -50,3 +50,4 @@ tests/*.log
 tests/*.png
 tests/*.json
 tests/.pytest_cache/
+tests/.venv/

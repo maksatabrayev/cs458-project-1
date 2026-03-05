@@ -1,0 +1,90 @@
+[
+  {
+    "id": "1",
+    "email": "testuser@ares.com",
+    "phone": "+905551234567",
+    "initialPassword": "Test@1234",
+    "name": "Test User",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "2",
+    "email": "admin@ares.com",
+    "phone": "+905559876543",
+    "initialPassword": "Admin@5678",
+    "name": "Admin User",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "3",
+    "email": "h.utku64@gmail.com",
+    "phone": "+905550001111",
+    "initialPassword": "GithubTest@123",
+    "name": "HuseyinUtkuYuksel",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "4",
+    "email": "h.utku45@gmail.com",
+    "phone": "+905550002222",
+    "initialPassword": "GoogleTest@123",
+    "name": "Utku Yüksel",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "5",
+    "email": "seniorprojecteway@gmail.com",
+    "phone": "+905550003333",
+    "initialPassword": "Suspended@123",
+    "name": "Suspended Hacker",
+    "status": "suspended",
+    "failedAttempts": 5,
+    "knownIPs": []
+  },
+  {
+    "id": "6",
+    "email": "maksatabrayew63@gmail.com",
+    "phone": "+905550004444",
+    "initialPassword": "GoogleUser@123",
+    "name": "Maksat Abrayev",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  {
+    "id": "7",
+    "email": "maksat.abrayev@ug.bilkent.edu.tr",
+    "phone": "+905550005555",
+    "initialPassword": "BilkentUser@123",
+    "name": "Maksat Abrayev Bilkent",
+    "status": "active",
+    "failedAttempts": 0,
+    "knownIPs": [
+      "127.0.0.1",
+      "::1"
+    ]
+  }
+]
