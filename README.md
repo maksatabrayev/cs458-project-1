@@ -16,7 +16,7 @@ ARES is an autonomous self-healing authentication system built with:
 |-------|-----------|
 | Frontend | Next.js 16 (React), Vanilla CSS |
 | Auth | NextAuth.js (Google, Facebook, Credentials) |
-| LLM | Google Gemini 2.0 Flash API |
+| LLM | Google Gemini API (`GEMINI_MODEL`, default: `gemini-2.5-flash`) |
 | Testing | Python 3.9+ / Selenium / pytest |
 | Database | In-memory (no external DB needed) |
 
@@ -85,13 +85,14 @@ Edit `.env.local` and fill in your API keys:
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=any-random-string-at-least-32-characters-long
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
 GOOGLE_CLIENT_ID=your_google_oauth_id       # Optional for now
 GOOGLE_CLIENT_SECRET=your_google_secret      # Optional for now
 FACEBOOK_CLIENT_ID=your_facebook_id          # Optional for now
 FACEBOOK_CLIENT_SECRET=your_facebook_secret  # Optional for now
 ```
 
-> **Note:** Social login buttons will redirect to NextAuth's default page if OAuth credentials aren't configured. The Gemini API key is required for the self-healing framework and fraud analysis.
+> **Note:** Social login buttons will redirect to NextAuth's default page if OAuth credentials aren't configured. The Gemini API key is required for the self-healing framework and fraud analysis. Model availability/quota can vary by project, so switch `GEMINI_MODEL` if one model is rate-limited.
 
 ### 3. Run the Web App
 
@@ -105,6 +106,7 @@ Open **http://localhost:3000** in your browser.
 
 ```bash
 cd tests
+source .venv/bin/activate  # for unix
 pip install -r requirements.txt
 ```
 
