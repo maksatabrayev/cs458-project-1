@@ -98,6 +98,10 @@ export default function LoginPage() {
   };
 
   const handleSocialLogin = (provider) => {
+    if (provider === "google") {
+      signIn("google", { callbackUrl: "/dashboard" }, { prompt: "select_account" });
+      return;
+    }
     signIn(provider, { callbackUrl: "/dashboard" });
   };
 

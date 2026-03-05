@@ -4,7 +4,7 @@ import FacebookProvider from "next-auth/providers/facebook";
 import GitHubProvider from "next-auth/providers/github";
 import CredentialsProvider from "next-auth/providers/credentials";
 
-import { findUserByEmailOrPhone } from "@/lib/users"; 
+import { findUserByEmailOrPhone } from "@/lib/users";
 import { verifyOAuthLogin } from "@/lib/oauthSecurity"; // NEW IMPORT
 
 const handler = NextAuth({
@@ -20,6 +20,9 @@ const handler = NextAuth({
         GitHubProvider({
             clientId: process.env.GITHUB_CLIENT_ID || "",
             clientSecret: process.env.GITHUB_CLIENT_SECRET || "",
+            authorization: {
+                params: { scope: "read:user user:email" },
+            },
         }),
         CredentialsProvider({
             name: "Credentials",
@@ -74,14 +77,19 @@ const handler = NextAuth({
                     if (securityCheck.exists && securityCheck.allowed) {
                         return true; // Let them in!
                     }
-                    
+                    console.log("OAuth signIn debug:", {
+                        provider: account?.provider,
+                        email: user?.email,
+                        name: user?.name,
+                    });
+
                     // Optional: You can redirect to an error page if they fail the check
                     // return "/login?error=AccessDenied"; 
-                    return false; 
+                    return false;
 
                 } catch (error) {
                     console.error("OAuth Security Check Failed:", error);
-                    return false; 
+                    return false;
                 }
             }
             return false;
@@ -94,8 +102,8 @@ const handler = NextAuth({
                 if (account && account.provider !== "credentials") {
                     const dbUser = findUserByEmailOrPhone(user.email);
                     if (dbUser) {
-                        token.id = dbUser.id; 
-                        token.riskScore = dbUser.riskScore; 
+                        token.id = dbUser.id;
+                        token.riskScore = dbUser.riskScore;
                         token.riskLevel = dbUser.riskLevel;
                     }
                 } else {
